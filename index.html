@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GS Interior & Exteriors - App</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <!-- PWA Manifest Link -->
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#d90429">
@@ -644,8 +645,159 @@ function goToSection(id){document.querySelectorAll('.panel-section').forEach(x=>
 function addNewRow(){const body=$('tableBody');if(!body)return;const i=body.children.length+1;const tr=document.createElement('tr');tr.innerHTML=`<td class="row-no">${i}</td><td><input class="item-name" placeholder="పని పేరు" style="width:120px"></td><td><div class="dim-box"><input class="dim-input length" type="number" min="0" step="any" placeholder="L"> × <input class="dim-input width" type="number" min="0" step="any" placeholder="W"></div></td><td class="area">0.00</td><td><input class="dim-input rate" type="number" min="0" step="any" value="0"></td><td class="line-total">₹0.00</td><td><button class="del-btn" type="button" onclick="this.closest('tr').remove();updateAllCalculations()">తొలగించు</button></td>`;body.appendChild(tr);tr.querySelectorAll('input').forEach(x=>x.addEventListener('input',updateAllCalculations));updateAllCalculations();}
 function updateAllCalculations(){const unit=val('globalUnit')||'Inch';let subtotal=0;document.querySelectorAll('#tableBody tr').forEach((tr,i)=>{tr.querySelector('.row-no').textContent=i+1;const l=Number(tr.querySelector('.length').value)||0,w=Number(tr.querySelector('.width').value)||0,r=Number(tr.querySelector('.rate').value)||0;const area=unit==='Inch'?l*w/144:unit==='MM'?l*w/92903.04:l*w;const total=area*r;subtotal+=total;tr.querySelector('.area').textContent=area.toFixed(2);tr.querySelector('.line-total').textContent=money(total);});$('subTotal').textContent=money(subtotal);calculateGrandTotal();}
 function calculateGrandTotal(){const sub=parseFloat(($('subTotal')?.textContent||'0').replace(/[₹,]/g,''))||0;const t=Number(val('transport'))||0,f=Number(val('fixing'))||0,d=Number(val('discount'))||0;$('grandTotal').textContent=money(Math.max(0,sub+t+f-d));}
-function quotationText(){let lines=['GS INTERIOR & EXTERIORS','కస్టమర్: '+val('custName'),'గ్రామం: '+val('custVillage'),'ఫోన్: '+val('custPhone'),'కొటేషన్: '+val('quotNo'),'తేదీ: '+val('quotDate'),''];document.querySelectorAll('#tableBody tr').forEach((tr,i)=>lines.push(`${i+1}. ${tr.querySelector('.item-name').value||'Item'} | ${tr.querySelector('.area').textContent} Sq.Ft | ${tr.querySelector('.line-total').textContent}`));lines.push('Subtotal: '+$('subTotal').textContent,'Transport: '+money(val('transport')),'Fixing: '+money(val('fixing')),'Discount: '+money(val('discount')),'Grand Total: '+$('grandTotal').textContent,'','Terms: '+val('terms'),'Contact: 8886456356, 8885223337');return lines.join('\n');}
-function sendWhatsAppQuotation(){if(!val('custName')){alert('కస్టమర్ పేరు నమోదు చేయండి.');return;}const phone=val('custPhone').replace(/\D/g,'');const url='https://wa.me/'+(phone.length===10?'91'+phone:'')+'?text='+encodeURIComponent(quotationText());window.open(url,'_blank');}
+function quotationPdfHtml(){
+  // Build a separate customer-facing document. This element contains quotation data only;
+  // the app login, password controls, dashboard and other screens are never captured.
+  updateAllCalculations();
+  const customerName=val('custName');
+  const village=val('custVillage');
+  const phone=val('custPhone');
+  const quotationNo=val('quotNo')||'GS-QUOTATION';
+  const quotationDate=val('quotDate')||today();
+  const unit=val('globalUnit')||'Inch';
+  const rows=[];
+  document.querySelectorAll('#tableBody tr').forEach((tr)=>{
+    const name=tr.querySelector('.item-name')?.value?.trim()||'';
+    const length=Number(tr.querySelector('.length')?.value)||0;
+    const width=Number(tr.querySelector('.width')?.value)||0;
+    const rate=Number(tr.querySelector('.rate')?.value)||0;
+    const area=Number(tr.querySelector('.area')?.textContent)||0;
+    const amount=area*rate;
+    if(name||length||width||rate){
+      rows.push({name:name||'పని వివరాలు',length,width,area,rate,amount});
+    }
+  });
+  if(!rows.length) throw new Error('కనీసం ఒక పని పేరు లేదా కొలత నమోదు చేయండి.');
+
+  const subtotal=rows.reduce((sum,row)=>sum+row.amount,0);
+  const transport=Math.max(0,Number(val('transport'))||0);
+  const fixing=Math.max(0,Number(val('fixing'))||0);
+  const discount=Math.max(0,Number(val('discount'))||0);
+  const grandTotal=Math.max(0,subtotal+transport+fixing-discount);
+  const terms=val('terms').split(/\r?\n/).map(line=>esc(line)).filter(Boolean).join('<br>');
+  const itemRows=rows.map((row,index)=>`
+    <tr>
+      <td class="center">${index+1}</td>
+      <td>${esc(row.name)}</td>
+      <td class="center">${row.length} × ${row.width} ${esc(unit)}</td>
+      <td class="num">${row.area.toFixed(2)}</td>
+      <td class="num">${money(row.rate)}</td>
+      <td class="num">${money(row.amount)}</td>
+    </tr>`).join('');
+
+  return `
+  <div id="gsQuotationPdf" style="width:190mm;box-sizing:border-box;background:#fff;color:#202020;padding:8mm;font-family:Arial,'Noto Sans Telugu',sans-serif;font-size:11px;line-height:1.45;">
+    <style>
+      #gsQuotationPdf *{box-sizing:border-box}
+      #gsQuotationPdf .brand{border-bottom:3px solid #d90429;padding-bottom:12px;text-align:center}
+      #gsQuotationPdf .brand img{width:66px;height:66px;object-fit:contain;display:block;margin:0 auto 5px}
+      #gsQuotationPdf h1{font-size:22px;letter-spacing:.4px;color:#d90429;margin:4px 0}
+      #gsQuotationPdf .muted{color:#555;margin:3px 0}
+      #gsQuotationPdf .doc-title{margin:15px auto 12px;width:170px;text-align:center;background:#d90429;color:#fff;padding:7px 12px;font-size:17px;font-weight:bold;letter-spacing:1px}
+      #gsQuotationPdf table{width:100%;border-collapse:collapse}
+      #gsQuotationPdf .details td{border:1px solid #d7d7d7;padding:7px 8px;width:50%;vertical-align:top}
+      #gsQuotationPdf .items{margin-top:14px;font-size:10px}
+      #gsQuotationPdf .items th{background:#292929;color:#fff;padding:8px 5px;border:1px solid #292929;text-align:center}
+      #gsQuotationPdf .items td{border:1px solid #d5d5d5;padding:7px 5px;vertical-align:top}
+      #gsQuotationPdf .items tbody tr:nth-child(even){background:#f7f7f7}
+      #gsQuotationPdf .center{text-align:center;white-space:nowrap}
+      #gsQuotationPdf .num{text-align:right;white-space:nowrap}
+      #gsQuotationPdf .totals{width:78%;margin:14px 0 0 auto}
+      #gsQuotationPdf .totals td{padding:6px 8px;border-bottom:1px solid #e1e1e1}
+      #gsQuotationPdf .grand td{background:#d90429;color:#fff;font-weight:bold;font-size:13px;border:0;padding:10px 8px}
+      #gsQuotationPdf .terms{margin-top:17px;border:1px solid #ddd;padding:10px}
+      #gsQuotationPdf .terms h3{margin:0 0 6px;color:#d90429;font-size:12px}
+      #gsQuotationPdf .signatures{display:flex;justify-content:space-between;gap:30px;margin-top:45px}
+      #gsQuotationPdf .signatures div{width:42%;border-top:1px solid #777;text-align:center;padding-top:6px}
+      #gsQuotationPdf .footer{border-top:1px solid #ddd;text-align:center;margin-top:18px;padding-top:8px;color:#555;font-size:10px}
+      #gsQuotationPdf tr{page-break-inside:avoid}
+    </style>
+    <div class="brand">
+      <img src="logo.png" alt="GS Logo">
+      <h1>GS INTERIOR &amp; EXTERIORS</h1>
+      <div><b>Best Interior, Exterior &amp; Fabrication Works</b></div>
+      <div class="muted">జగపతినిగరం, మెయిన్ రోడ్, కిర్లంపూడి (PIN: 533343)</div>
+      <div class="muted"><b>Contact: 8886456356, 8885223337</b></div>
+    </div>
+    <div class="doc-title">QUOTATION</div>
+    <table class="details">
+      <tr><td><b>Customer Name / కస్టమర్ పేరు:</b><br>${esc(customerName)}</td><td><b>Quotation No:</b><br>${esc(quotationNo)}</td></tr>
+      <tr><td><b>Village / గ్రామం:</b><br>${esc(village||'-')}</td><td><b>Date / తేదీ:</b><br>${esc(quotationDate)}</td></tr>
+      <tr><td colspan="2"><b>Contact Number / ఫోన్:</b> ${esc(phone||'-')}</td></tr>
+    </table>
+    <table class="items">
+      <thead><tr><th style="width:6%">S.No</th><th style="width:25%">Work Description</th><th style="width:20%">Measurements</th><th style="width:12%">Sq.Ft</th><th style="width:16%">Rate</th><th style="width:21%">Amount</th></tr></thead>
+      <tbody>${itemRows}</tbody>
+    </table>
+    <table class="totals">
+      <tr><td>Subtotal / సబ్ టోటల్</td><td class="num">${money(subtotal)}</td></tr>
+      <tr><td>Transport / ట్రాన్స్‌పోర్ట్</td><td class="num">${money(transport)}</td></tr>
+      <tr><td>Fixing &amp; Labour / ఫిక్సింగ్</td><td class="num">${money(fixing)}</td></tr>
+      <tr><td>Discount / డిస్కౌంట్</td><td class="num">− ${money(discount)}</td></tr>
+      <tr class="grand"><td>GRAND TOTAL / మొత్తం</td><td class="num">${money(grandTotal)}</td></tr>
+    </table>
+    <div class="terms"><h3>Terms &amp; Conditions / నిబంధనలు</h3>${terms||'పైన పేర్కొన్న వివరాల ప్రకారం పని చేయబడును.'}</div>
+    <div class="signatures"><div>Customer Signature</div><div>For GS Interior &amp; Exteriors<br>Authorized Signature</div></div>
+    <div class="footer"><b>Thank you for choosing GS Interior &amp; Exteriors</b></div>
+  </div>`;
+}
+
+async function sendWhatsAppQuotation(){
+  if(!val('custName')){alert('కస్టమర్ పేరు నమోదు చేయండి.');return;}
+  const phone=val('custPhone').replace(/\D/g,'');
+  if(phone && phone.length!==10 && phone.length!==12){alert('కస్టమర్ ఫోన్ నంబర్ 10 అంకెలుగా నమోదు చేయండి.');return;}
+  if(typeof window.html2pdf!=='function'){
+    alert('PDF తయారీ Library లోడ్ కాలేదు. Internet ON చేసి పేజీ Refresh చేసి మళ్లీ ప్రయత్నించండి.');
+    return;
+  }
+
+  let pdfNode;
+  try{
+    pdfNode=document.createElement('div');
+    pdfNode.style.cssText='position:fixed;left:-10000px;top:0;width:190mm;background:#fff;z-index:-1;';
+    pdfNode.innerHTML=quotationPdfHtml();
+    document.body.appendChild(pdfNode);
+    const logo=pdfNode.querySelector('img');
+    if(logo && !logo.complete){await new Promise(resolve=>{logo.onload=resolve;logo.onerror=resolve;setTimeout(resolve,2500);});}
+
+    const quoteNo=(val('quotNo')||'Quotation').replace(/[^a-zA-Z0-9_-]/g,'-');
+    const fileName=`GS-Quotation-${quoteNo}.pdf`;
+    const options={
+      margin:[8,8,10,8],
+      filename:fileName,
+      image:{type:'jpeg',quality:0.98},
+      html2canvas:{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false},
+      jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+      pagebreak:{mode:['css','legacy']}
+    };
+    const blob=await window.html2pdf().set(options).from(pdfNode.firstElementChild).outputPdf('blob');
+    const pdfFile=new File([blob],fileName,{type:'application/pdf'});
+
+    if(navigator.canShare && navigator.canShare({files:[pdfFile]})){
+      try{
+        await navigator.share({files:[pdfFile],title:'GS Quotation',text:'GS Interior & Exteriors Quotation'});
+      }catch(shareError){
+        if(shareError.name!=='AbortError') throw shareError;
+      }
+    }else{
+      const blobUrl=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=blobUrl;a.download=fileName;document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(blobUrl),60000);
+      if(phone){
+        const waPhone=phone.length===10?'91'+phone:phone;
+        window.open('https://wa.me/'+waPhone,'_blank','noopener');
+        alert('Quotation PDF Download అయింది. WhatsApp Chatలో Attachment → Document ద్వారా ఈ PDF పంపండి.');
+      }else{
+        alert('Quotation PDF Download అయింది. WhatsAppలో Customer Chat ఓపెన్ చేసి PDF పంపండి.');
+      }
+    }
+  }catch(error){
+    console.error('GS quotation PDF error:',error);
+    alert(error.message||'PDF తయారీలో సమస్య వచ్చింది. మళ్లీ ప్రయత్నించండి.');
+  }finally{
+    if(pdfNode && pdfNode.parentNode)pdfNode.parentNode.removeChild(pdfNode);
+  }
+}
 function saveCustomerAccount(){const name=val('accName'),total=Number(val('accTotal'));if(!name){alert('కస్టమర్ పేరు ఇవ్వండి.');return;}if(total<0){alert('ఆర్డర్ విలువ సరిగా ఇవ్వండి.');return;}data.customers.push({id:uid(),name,village:val('accVillage'),phone:val('accPhone'),total,orderDate:val('accOrderDate')||today(),advances:[]});saveData();['accName','accVillage','accPhone','accTotal'].forEach(id=>$(id).value='');renderCustomerList();refreshCashCustomerOptions();alert('కస్టమర్ ఖాతా సేవ్ అయింది.');}
 function customerPaid(c){return (c.advances||[]).reduce((s,a)=>s+Number(a.amount),0)}
 function renderCustomerList(){const body=$('customerTableBody');if(!body)return;body.innerHTML=data.customers.map((c,i)=>`<tr><td>${i+1}</td><td><a class="name-link" onclick="openCustomer('${c.id}')">${esc(c.name)} / ${esc(c.village)}</a></td><td>${esc(c.phone)}</td><td>${money(c.total)}<br>${esc(c.orderDate)}</td><td>${money(customerPaid(c))}</td><td>${money(c.total-customerPaid(c))}</td><td><a class="quot-link" onclick="loadCustomerQuotation('${c.id}')">కొటేషన్</a></td><td><button class="del-btn" onclick="deleteCustomer('${c.id}')">తొలగించు</button></td></tr>`).join('')||'<tr><td colspan="8">ఇంకా కస్టమర్లు లేరు.</td></tr>';}
